@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduGuesser - Explore the World</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Replace with your actual Google Maps API Key in a real environment -->
+    <!-- Using a placeholder for demonstration purposes as actual API keys shouldn't be hardcoded -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY_HERE&callback=initMap&v=weekly" defer></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a2e; /* Darker background resembling the image */
+            color: white;
+            overflow: hidden; /* Prevent scrolling */
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #street-view-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1; /* Base layer */
+            background-color: #333; /* Fallback if maps fail */
+        }
+
+        /* Styling for the UI overlay */
+        .ui-overlay {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through empty space */
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Make interactive elements clickable */
+        .interactive {
+            pointer-events: auto;
+        }
+
+        /* Top Bar Styling */
+        .top-bar {
+            background-color: rgba(20, 20, 30, 0.9);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Leaderboard styling (Left panel) */
+        .leaderboard-panel {
+            background-color: rgba(26, 26, 46, 0.85); /* Semi-transparent dark purple */
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            width: 280px;
+            max-height: 70vh;
+            overflow-y: auto;
+            margin: 20px;
+        }
+
+        /* Custom scrollbar for leaderboard */
+        .leaderboard-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+        .leaderboard-panel::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.2);
+        }
+        .leaderboard-panel::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.2);
+            border-radius: 3px;
+        }
+
+        .player-row {
+            transition: background-color 0.2s;
+        }
+        .player-row:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .player-row.current-player {
+            background-color: rgba(76, 58, 114, 0.8); /* Highlight current player */
+            border-left: 3px solid #a855f7;
+        }
+
+        /* Map Container Styling (Bottom Right) */
+        .map-wrapper {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 400px;
+            height: 300px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+            border: 2px solid rgba(255,255,255,0.2);
+            transition: transform 0.3s ease, width 0.3s ease, height 0.3s ease;
+            transform-origin: bottom right;
+        }
+        
+        .map-wrapper:hover {
+            transform: scale(1.02);
+            border-color: rgba(255,255,255,0.4);
+        }
+
+        #guess-map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Map controls overlay (zoom in/out, expand) */
+        .map-controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.6);
+            border-radius: 4px;
+            display: flex;
+            gap: 4px;
+            padding: 4px;
+            z-index: 20;
+        }
+        .map-control-btn {
+            background: white;
+            color: black;
+            width: 24px;
+            height: 24px;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .map-control-btn:hover {
+            background: #eee;
+        }
+
+        /* Guess Button Styling */
+        .guess-btn-container {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+            z-index: 20;
+        }
+
+        .guess-btn {
+            background: linear-gradient(to right, #6d28d9, #4c1d95);
+            color: white;
+            font-weight: bold;
+            padding: 8px 32px;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+            opacity: 0.5; /* Disabled state initially */
+            cursor: not-allowed;
+        }
+        .guess-btn.active {
+            opacity: 1;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(109, 40, 217, 0.6);
+        }
+        .guess-btn.active:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(109, 40, 217, 0.8);
+        }
+
+        /* Status/Lives panel (Top Right) */
+        .status-panel {
+            background: linear-gradient(135deg, #4c1d95, #312e81);
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 8px 16px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        /* Compass/Tools (Bottom Left) */
+        .tools-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-left: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .tool-btn {
+            width: 40px;
+            height: 40px;
+            background-color: rgba(0,0,0,0.6);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .tool-btn:hover {
+            background-color: rgba(0,0,0,0.8);
+        }
+        .tool-btn.compass {
+            width: 50px;
+            height: 50px;
+            background-color: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        .compass-arrow {
+            transition: transform 0.1s ease-out;
+            color: #ef4444; /* Red tip */
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            width: 300px;
+            height: 16px;
+            background-color: #1e1e38;
+            border-radius: 8px;
+            border: 1px solid #4a4a6a;
+            overflow: hidden;
+            position: absolute;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .progress-bar {
+            height: 100%;
+            background-color: #a78bfa;
+            width: 45%; /* Example progress */
+            border-radius: 8px;
+        }
+
+        /* Result Modal */
+        #result-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: #1e1e38;
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+            border: 1px solid #4a4a6a;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        /* Hearts */
+        .heart {
+            color: #ec4899;
+            font-size: 10px;
+        }
+        .heart.empty {
+            color: #4b5563;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Base Layer: Google Street View -->
+    <div id="street-view-container"></div>
+
+    <!-- UI Overlay Layer -->
+    <div class="ui-overlay">
+        
+        <!-- Top Navigation Bar -->
+        <header class="top-bar flex justify-between items-center px-4 py-2 interactive w-full">
+            <div class="flex items-center gap-4">
+                <div class="text-2xl font-black italic tracking-tighter text-white">
+                    <span class="text-green-400">EDU</span>GUESSER
+                </div>
+            </div>
+
+            <!-- Center Search Bar (Mockup) -->
+            <div class="flex-1 max-w-md mx-4">
+                <div class="relative">
+                    <input type="text" placeholder="Search for other players or maps" class="w-full bg-gray-800 text-sm text-gray-300 rounded-md py-1.5 px-3 pl-8 focus:outline-none focus:ring-1 focus:ring-gray-500 border border-gray-700">
+                    <i class="fas fa-search absolute left-2.5 top-2 text-gray-500 text-xs"></i>
+                </div>
+            </div>
+
+            <!-- Right side user controls -->
+            <div class="flex items-center gap-4">
+                <button class="text-gray-300 hover:text-white"><i class="fas fa-bell"></i></button>
+                <button class="text-yellow-400"><i class="fas fa-star"></i></button>
+                <div class="flex items-center gap-2 bg-gray-800 rounded-full py-1 px-2 border border-gray-700 cursor-pointer">
+                    <img src="https://ui-avatars.com/api/?name=Student&background=random" alt="User" class="w-6 h-6 rounded-full">
+                    <span class="text-xs font-bold uppercase tracking-wider">Student1</span>
+                </div>
+                <button class="text-gray-300 hover:text-white ml-2"><i class="fas fa-bars"></i></button>
+            </div>
+        </header>
+
+        <!-- Progress Bar (Center Top) -->
+        <div class="progress-container interactive">
+            <div class="progress-bar"></div>
+        </div>
+
+        <div class="flex flex-1 justify-between relative w-full h-full pointer-events-none">
+            
+            <!-- Left Panel (Leaderboard & Tools) -->
+            <div class="flex flex-col justify-between h-full">
+                
+                <!-- Leaderboard -->
+                <div class="leaderboard-panel interactive flex flex-col">
+                    <div class="p-2 space-y-1" id="leaderboard-list">
+                        <!-- Populated by JS -->
+                    </div>
+                    
+                    <div class="p-3 border-t border-gray-700 mt-auto text-center">
+                        <button class="text-xs font-semibold text-gray-300 bg-gray-800 rounded-full px-4 py-1.5 border border-gray-600 hover:bg-gray-700 transition">
+                            YOU ARE CURRENTLY ON A CHECKPOINT
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tools (Compass, Zoom, etc.) -->
+                <div class="tools-panel interactive">
+                    <div class="tool-btn compass relative">
+                        <!-- Simplified compass visual -->
+                        <div class="absolute inset-0 rounded-full border-2 border-dashed border-gray-500 opacity-50"></div>
+                        <i class="fas fa-location-arrow compass-arrow transform -rotate-45 text-xl"></i>
+                    </div>
+                    <div class="tool-btn"><i class="fas fa-expand"></i></div>
+                    <div class="tool-btn"><i class="fas fa-flag"></i></div>
+                    <div class="tool-btn"><i class="fas fa-plus"></i></div>
+                    <div class="tool-btn"><i class="fas fa-minus"></i></div>
+                </div>
+            </div>
+
+            <!-- Right Panel (Status & Map) -->
+            <div class="flex flex-col items-end p-4 h-full relative w-full">
+                
+                <!-- Status Panel (Lives, Score) -->
+                <div class="status-panel interactive mb-4">
+                    <div class="flex flex-col items-center">
+                        <span class="text-[10px] text-gray-300 uppercase tracking-wider">Lives</span>
+                        <div class="flex items-center gap-1">
+                            <span class="font-bold italic text-lg">5 x</span>
+                            <i class="fas fa-heart text-pink-500 text-xl"></i>
+                        </div>
+                    </div>
+                    <div class="w-px h-8 bg-white/20"></div>
+                    <div class="flex flex-col items-center">
+                        <span class="text-[10px] text-gray-300 uppercase tracking-wider">Score</span>
+                        <div class="flex items-center gap-1">
+                            <span class="font-bold italic text-lg">0</span>
+                            <i class="fas fa-bolt text-yellow-500 text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Map Container -->
+                <div class="map-wrapper interactive" id="map-wrapper">
+                    <div class="map-controls">
+                        <div class="map-control-btn" title="Expand Map"><i class="fas fa-expand-arrows-alt"></i></div>
+                    </div>
+                    <div id="guess-map"></div>
+                    
+                    <!-- Guess Button Inside Map Container at Bottom -->
+                    <div class="guess-btn-container">
+                        <button id="make-guess-btn" class="guess-btn">Guess</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Result Modal -->
+    <div id="result-modal" class="interactive">
+        <div class="modal-content">
+            <h2 id="result-title" class="text-3xl font-black italic mb-4 text-white"></h2>
+            <p id="result-distance" class="text-xl text-gray-300 mb-6"></p>
+            <div class="flex justify-center gap-4">
+                <div class="bg-gray-800 p-4 rounded-lg">
+                    <p class="text-xs text-gray-400 uppercase">Score Earned</p>
+                    <p id="result-score" class="text-2xl font-bold text-yellow-400">0</p>
+                </div>
+            </div>
+            <button id="next-round-btn" class="mt-8 bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-8 rounded-full transition w-full">
+                Play Next Round
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration & State ---
+        // Pre-defined educational locations (coordinates)
+        const locations = [
+            { lat: 48.8584, lng: 2.2945, name: "Eiffel Tower, Paris" }, // Paris
+            { lat: 41.8902, lng: 12.4922, name: "Colosseum, Rome" }, // Rome
+            { lat: 35.6586, lng: 139.7454, name: "Tokyo Tower, Japan" }, // Tokyo
+            { lat: 40.6892, lng: -74.0445, name: "Statue of Liberty, NY" }, // NY
+            { lat: -33.8568, lng: 151.2153, name: "Sydney Opera House" } // Sydney
+        ];
+
+        let currentRound = 0;
+        let score = 0;
+        let map;
+        let streetViewPanorama;
+        let guessMarker = null;
+        let actualLocationMarker = null;
+        let connectionLine = null;
+        let selectedLocation = null;
+
+        // Mock Leaderboard Data
+        const leaderboardData = [
+            { rank: 1, name: "grayling", score: 82, avatar: "https://ui-avatars.com/api/?name=gr&background=random", me: false },
+            { rank: 2, name: "fwd", score: 46, avatar: "https://ui-avatars.com/api/?name=fw&background=random", me: false },
+            { rank: 3, name: "icukaps", score: 40, avatar: "https://ui-avatars.com/api/?name=ic&background=random", me: false },
+            { rank: 4, name: "n9", score: 28, avatar: "https://ui-avatars.com/api/?name=n9&background=random", me: false },
+            { rank: 55, name: "Anguila", score: 1, avatar: "https://ui-avatars.com/api/?name=An&background=random", me: false },
+            { rank: 56, name: "Maki", score: 0, avatar: "https://ui-avatars.com/api/?name=Ma&background=random", me: false },
+            { rank: 57, name: "Nikita", score: 0, avatar: "https://ui-avatars.com/api/?name=Ni&background=random", me: false },
+            { rank: 58, name: "Student1", score: 0, avatar: "https://ui-avatars.com/api/?name=St&background=random", me: true }, // Current user
+            { rank: 59, name: "RANNNY", score: 0, avatar: "https://ui-avatars.com/api/?name=RA&background=random", me: false },
+        ];
+
+        // --- UI Initialization ---
+
+        function renderLeaderboard() {
+            const list = document.getElementById('leaderboard-list');
+            list.innerHTML = '';
+
+            leaderboardData.forEach(player => {
+                const isMe = player.me;
+                const row = document.createElement('div');
+                row.className = `player-row flex items-center justify-between p-2 rounded cursor-pointer ${isMe ? 'current-player' : ''}`;
+                
+                // Construct hearts string
+                const heartsHtml = Array(5).fill('<i class="fas fa-heart heart"></i>').join('');
+
+                row.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs text-gray-400 w-4">${player.rank}.</span>
+                        <img src="${player.avatar}" class="w-6 h-6 rounded-full border border-gray-600" alt="${player.name}">
+                        <div class="flex flex-col">
+                            <span class="text-xs font-bold ${isMe ? 'text-white' : 'text-gray-300'} truncate w-24">${player.name}</span>
+                            <div class="flex gap-[2px] mt-0.5">
+                                ${heartsHtml}
+                            </div>
+                        </div>
+                    </div>
+                    <span class="text-xs font-bold">${player.score}</span>
+                `;
+                list.appendChild(row);
+            });
+        }
+
+        // --- Google Maps Initialization ---
+        // Note: This function is called by the Google Maps script callback
+        function initMap() {
+            // Pick a random location for the current round
+            currentRound = Math.floor(Math.random() * locations.length);
+            selectedLocation = locations[currentRound];
+
+            // 1. Initialize Street View
+            // If API key is missing or invalid, this will fail gracefully or show a generic map
+            try {
+                streetViewPanorama = new google.maps.StreetViewPanorama(
+                    document.getElementById("street-view-container"),
+                    {
+                        position: selectedLocation,
+                        pov: { heading: 165, pitch: 0 },
+                        zoom: 1,
+                        addressControl: false,
+                        showRoadLabels: false,
+                        linksControl: true,
+                        panControl: true,
+                        enableCloseButton: false,
+                        fullscreenControl: false,
+                    }
+                );
+
+                // Update compass arrow based on view
+                streetViewPanorama.addListener('pov_changed', () => {
+                    const heading = streetViewPanorama.getPov().heading;
+                    const arrow = document.querySelector('.compass-arrow');
+                    if(arrow) arrow.style.transform = `rotate(${heading - 45}deg)`; // -45 offset due to FontAwesome icon default angle
+                });
+
+            } catch (e) {
+                console.warn("Street View could not load. Ensure API key is valid and billing is enabled.", e);
+                document.getElementById('street-view-container').innerHTML = 
+                    `<div class="flex h-full items-center justify-center text-gray-400 bg-gray-900">
+                        <div class="text-center p-8 bg-gray-800 rounded-xl">
+                            <i class="fas fa-exclamation-triangle text-4xl mb-4 text-yellow-500"></i>
+                            <p>Street View requires a valid Google Maps API Key.</p>
+                            <p class="text-sm mt-2">Displaying placeholder background.</p>
+                        </div>
+                    </div>`;
+            }
+
+            // 2. Initialize the Guessing Map (2D)
+            try {
+                map = new google.maps.Map(document.getElementById("guess-map"), {
+                    center: { lat: 20, lng: 0 }, // Center of world
+                    zoom: 2,
+                    mapTypeControl: false,
+                    streetViewControl: false,
+                    fullscreenControl: false,
+                    zoomControl: false, // We'll rely on custom or default scroll
+                    styles: [
+                        { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+                        { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+                        { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+                        {
+                            featureType: "administrative.locality",
+                            elementType: "labels.text.fill",
+                            stylers: [{ color: "#d59563" }],
+                        },
+                        {
+                            featureType: "water",
+                            elementType: "geometry",
+                            stylers: [{ color: "#17263c" }],
+                        }
+                    ] // Dark mode map styles roughly matching image
+                });
+
+                // Handle user clicks on the 2D map to place a guess marker
+                map.addListener("click", (e) => {
+                    placeMarker(e.latLng);
+                });
+            } catch (e) {
+                console.warn("Map could not load.", e);
+                 document.getElementById('guess-map').innerHTML = 
+                    `<div class="flex h-full items-center justify-center text-xs text-gray-500 bg-gray-800">Map Unavailable</div>`;
+            }
+        }
+
+        // --- Game Logic ---
+
+        function placeMarker(latLng) {
+            if (!map) return;
+            
+            // Remove previous guess marker if it exists
+            if (guessMarker) {
+                guessMarker.setMap(null);
+            }
+
+            // Add new guess marker
+            guessMarker = new google.maps.Marker({
+                position: latLng,
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 6,
+                    fillColor: "#eab308", // Yellow
+                    fillOpacity: 1,
+                    strokeWeight: 2,
+                    strokeColor: "#ffffff"
+                }
+            });
+
+            // Enable the guess button
+            const guessBtn = document.getElementById('make-guess-btn');
+            guessBtn.classList.add('active');
+            guessBtn.disabled = false;
+        }
+
+        // Calculate distance between two coordinates in km using Haversine formula
+        function calculateDistance(mk1, mk2) {
+            const R = 6371; // Radius of the Earth in km
+            const rlat1 = mk1.lat * (Math.PI/180); // Convert degrees to radians
+            const rlat2 = mk2.lat * (Math.PI/180); // Convert degrees to radians
+            const difflat = rlat2 - rlat1; // Radian difference (latitudes)
+            const difflon = (mk2.lng - mk1.lng) * (Math.PI/180); // Radian difference (longitudes)
+
+            const d = 2 * R * Math.asin(Math.sqrt(Math.sin(difflat/2)*Math.sin(difflat/2)+Math.cos(rlat1)*Math.cos(rlat2)*Math.sin(difflon/2)*Math.sin(difflon/2)));
+            return d;
+        }
+
+        // Handle Guess Submission
+        document.getElementById('make-guess-btn').addEventListener('click', function() {
+            if (!this.classList.contains('active') || !guessMarker) return;
+
+            const guessPos = {
+                lat: guessMarker.getPosition().lat(),
+                lng: guessMarker.getPosition().lng()
+            };
+            const actualPos = { lat: selectedLocation.lat, lng: selectedLocation.lng };
+
+            // Calculate distance
+            const distanceKm = calculateDistance(guessPos, actualPos);
+            
+            // Calculate score (simple decay function based on distance, max 5000)
+            const maxScore = 5000;
+            // 2000km distance = ~0 score
+            const roundScore = Math.max(0, Math.floor(maxScore * Math.exp(-distanceKm / 500)));
+            
+            showResult(distanceKm, roundScore, actualPos);
+        });
+
+        function showResult(distance, points, actualPos) {
+            // Show actual location on map
+            actualLocationMarker = new google.maps.Marker({
+                position: actualPos,
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 7,
+                    fillColor: "#10b981", // Green
+                    fillOpacity: 1,
+                    strokeWeight: 2,
+                    strokeColor: "#ffffff"
+                },
+                title: selectedLocation.name
+            });
+
+            // Draw line between guess and actual
+            connectionLine = new google.maps.Polyline({
+                path: [
+                    guessMarker.getPosition(),
+                    actualPos
+                ],
+                geodesic: true,
+                strokeColor: '#ffffff',
+                strokeOpacity: 0.8,
+                strokeWeight: 2,
+                map: map
+            });
+
+            // Fit bounds to show both markers
+            const bounds = new google.maps.LatLngBounds();
+            bounds.extend(guessMarker.getPosition());
+            bounds.extend(actualPos);
+            map.fitBounds(bounds);
+
+            // Update UI Modal
+            const modal = document.getElementById('result-modal');
+            const title = document.getElementById('result-title');
+            const distText = document.getElementById('result-distance');
+            const scoreText = document.getElementById('result-score');
+
+            if (distance < 50) {
+                title.innerText = "Excellent Guess!";
+                title.className = "text-3xl font-black italic mb-4 text-green-400";
+            } else if (distance < 500) {
+                title.innerText = "Good Job!";
+                title.className = "text-3xl font-black italic mb-4 text-yellow-400";
+            } else {
+                title.innerText = "Needs Improvement";
+                title.className = "text-3xl font-black italic mb-4 text-red-400";
+            }
+
+            distText.innerText = `You were ${distance.toFixed(1)} km away from ${selectedLocation.name}.`;
+            
+            // Animate score
+            let currentScore = 0;
+            const scoreInterval = setInterval(() => {
+                currentScore += Math.ceil(points / 20);
+                if (currentScore >= points) {
+                    currentScore = points;
+                    clearInterval(scoreInterval);
+                }
+                scoreText.innerText = currentScore;
+            }, 50);
+
+            modal.style.display = "flex";
+        }
+
+        // Reset for next round
+        document.getElementById('next-round-btn').addEventListener('click', () => {
+            document.getElementById('result-modal').style.display = "none";
+            
+            // Clean map
+            if (guessMarker) guessMarker.setMap(null);
+            if (actualLocationMarker) actualLocationMarker.setMap(null);
+            if (connectionLine) connectionLine.setMap(null);
+            guessMarker = null;
+
+            // Reset UI
+            const guessBtn = document.getElementById('make-guess-btn');
+            guessBtn.classList.remove('active');
+            guessBtn.disabled = true;
+
+            // Load new location
+            // Re-triggering initMap is a simple way to reload a new panorama and reset map center
+            if(typeof google !== 'undefined') {
+                 initMap(); 
+            }
+        });
+
+        // Initialize UI components that don't depend on Google Maps
+        window.onload = () => {
+            renderLeaderboard();
+            
+            // Simulate Map expansion interaction
+            const mapWrapper = document.getElementById('map-wrapper');
+            let isExpanded = false;
+            
+            // Allow expanding map on hover/click interaction area
+            mapWrapper.addEventListener('mouseenter', () => {
+                if(!isExpanded) {
+                    mapWrapper.style.width = '600px';
+                    mapWrapper.style.height = '450px';
+                }
+            });
+            mapWrapper.addEventListener('mouseleave', () => {
+                 if(!isExpanded) {
+                    mapWrapper.style.width = '400px';
+                    mapWrapper.style.height = '300px';
+                }
+            });
+
+            // Fallback initialization if maps API fails to load (e.g. offline or blocked)
+            setTimeout(() => {
+                if (typeof google === 'undefined') {
+                    console.error("Google Maps API failed to load.");
+                    document.getElementById('street-view-container').innerHTML = 
+                        `<div class="flex h-full items-center justify-center text-white bg-gray-900">
+                            <p>Map Service Unavailable. Please check API key or connection.</p>
+                        </div>`;
+                }
+            }, 3000);
+        };
+    </script>
+</body>
+</html>
